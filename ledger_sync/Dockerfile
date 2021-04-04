@@ -17,7 +17,7 @@
 #   Builds server and client node dependencies, creating a server image
 #   which can be run with root context
 
-FROM ubuntu:bionic
+FROM ubuntu:xenial
 
 LABEL "install-type"="mounted"
 
@@ -25,7 +25,6 @@ LABEL "install-type"="mounted"
 RUN apt-get update && apt-get install -y -q --no-install-recommends \
     curl \
     ca-certificates \
-    gnupg \
     pkg-config \
     build-essential \
     libzmq3-dev \

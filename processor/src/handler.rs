@@ -1083,11 +1083,6 @@ impl SupplyChainTransactionHandler {
                     "Only the owner can create a proposal to change ownership",
                 )));
             }
-            if role == proposal::Proposal_Role::REPORTER && properties.len() == 0 {
-                return Err(ApplyError::InvalidTransaction(String::from(
-                    "Property list cannot be empty for Reporter role",
-                )))
-            }
         }
 
         if role == proposal::Proposal_Role::CUSTODIAN {

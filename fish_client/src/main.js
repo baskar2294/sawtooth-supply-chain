@@ -50,8 +50,8 @@ const Layout = {
 
 const loggedInNav = () => {
   const links = [
-    ['/create', 'Add Fish'],
-    ['/fish', 'View Fish'],
+    ['/create', 'Add Reagent'],
+    ['/fish', 'View Reagents'],
     ['/agents', 'View Agents']
   ]
   return m(navigation.Navbar, {}, [
@@ -63,7 +63,7 @@ const loggedInNav = () => {
 
 const loggedOutNav = () => {
   const links = [
-    ['/fish', 'View Fish'],
+    ['/fish', 'View Reagent'],
     ['/agents', 'View Agents']
   ]
   return m(navigation.Navbar, {}, [

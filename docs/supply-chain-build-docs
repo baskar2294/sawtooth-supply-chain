@@ -26,18 +26,14 @@
 #   $ cd sawtooth-supply-chain
 #   $ docker run -v $(pwd):/project/sawtooth-supply-chain supply-chain-build-docs
 
-FROM ubuntu:bionic
+FROM ubuntu:xenial
 
-RUN apt-get update \
-  && apt-get install gnupg -y
-
-RUN echo "deb http://repo.sawtooth.me/ubuntu/ci bionic universe" >> /etc/apt/sources.list \
+RUN echo "deb http://repo.sawtooth.me/ubuntu/ci xenial universe" >> /etc/apt/sources.list \
  && apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 8AA7AF1F1091A5FD \
  && apt-get update \
- && apt-get install -y -q \
+ && apt-get install -y -q --allow-downgrades \
     build-essential \
     git \
-    latexmk \
     pep8 \
     python3-colorlog \
     python3-dev \
@@ -49,15 +45,13 @@ RUN echo "deb http://repo.sawtooth.me/ubuntu/ci bionic universe" >> /etc/apt/sou
     pylint \
     bandit
 
-ENV DEBIAN_FRONTEND=noninteractive
-
 # Install jsdoc
 RUN apt-get update && apt-get install -y -q --no-install-recommends \
     curl \
  && curl -s -S -o /tmp/setup-node.sh https://deb.nodesource.com/setup_6.x \
  && chmod 755 /tmp/setup-node.sh \
  && /tmp/setup-node.sh \
- && apt-get install nodejs npm -y -q \
+ && apt-get install nodejs -y -q \
  && rm /tmp/setup-node.sh \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
@@ -76,7 +70,7 @@ RUN apt-get update && apt-get install -y -q \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install \
-    sphinx \
+    sphinx==1.5.6 \
     sphinxcontrib-httpdomain \
     sphinxcontrib-openapi \
     sphinx_rtd_theme

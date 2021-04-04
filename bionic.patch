@@ -1,0 +1,1511 @@
+diff --git a/.env b/.env
+index 1ec094d6..ae5d4298 100644
+--- a/.env
++++ b/.env
+@@ -1 +1,2 @@
+ ISOLATION_ID=latest
++DISTRO=bionic
+diff --git a/.github/settings.yml b/.github/settings.yml
+new file mode 100644
+index 00000000..0ffdac08
+--- /dev/null
++++ b/.github/settings.yml
+@@ -0,0 +1,9 @@
++#
++# SPDX-License-Identifier: Apache-2.0
++#
++
++repository:
++  name: sawtooth-supply-chain
++  description: Archive of sawtooth-supply-chain: Sawtooth Supply Chain
++  archived: true
++  private: false
+diff --git a/CODEOWNERS b/CODEOWNERS
+new file mode 100644
+index 00000000..f3775b31
+--- /dev/null
++++ b/CODEOWNERS
+@@ -0,0 +1 @@
++*       @agunde406 @boydjohnson @chenette @dcmiddle @delventhalz @dplumb94 @jsmitchell @peterschwarz @rbuysse @ryanlassigbanks @vaporos
+diff --git a/Jenkinsfile b/Jenkinsfile
+index d1b9015e..29fa2051 100644
+--- a/Jenkinsfile
++++ b/Jenkinsfile
+@@ -15,78 +15,112 @@
+ // limitations under the License.
+ // ------------------------------------------------------------------------------
+ 
+-// Discard old builds after 31 days
+-properties([[$class: 'BuildDiscarderProperty', strategy:
+-        [$class: 'LogRotator', artifactDaysToKeepStr: '',
+-        artifactNumToKeepStr: '', daysToKeepStr: '31', numToKeepStr: '']]]);
+-
+-node ('master') {
+-    // Create a unique workspace so Jenkins doesn't reuse an existing one
+-    ws("workspace/${env.BUILD_TAG}") {
+-        stage("Clone Repo") {
+-            checkout scm
+-            sh 'git fetch --tag'
++pipeline {
++    agent {
++        node {
++            label 'master'
++            customWorkspace "workspace/${env.BUILD_TAG}"
+         }
++    }
++
++    triggers {
++        cron(env.BRANCH_NAME == 'master' ? 'H 3 * * *' : '')
++    }
++
++    options {
++        timestamps()
++        buildDiscarder(logRotator(daysToKeepStr: '31'))
++    }
+ 
+-        if (!(env.BRANCH_NAME == 'master' && env.JOB_BASE_NAME == 'master')) {
+-            stage("Check Whitelist") {
++    environment {
++        ISOLATION_ID = sh(returnStdout: true, script: 'printf $BUILD_TAG | sha256sum | cut -c1-64').trim()
++    }
++
++    stages {
++        stage('Check Whitelist') {
++            steps {
+                 readTrusted 'bin/whitelist'
+                 sh './bin/whitelist "$CHANGE_AUTHOR" /etc/jenkins-authorized-builders'
+             }
++            when {
++                not {
++                    branch 'master'
++                }
++            }
+         }
+ 
+-        stage("Check for Signed-Off Commits") {
+-            sh '''#!/bin/bash -l
+-                if [ -v CHANGE_URL ] ;
+-                then
+-                    temp_url="$(echo $CHANGE_URL |sed s#github.com/#api.github.com/repos/#)/commits"
+-                    pull_url="$(echo $temp_url |sed s#pull#pulls#)"
++        stage('Check for Signed-Off Commits') {
++            steps {
++                sh '''#!/bin/bash -l
++                    if [ -v CHANGE_URL ] ;
++                    then
++                        temp_url="$(echo $CHANGE_URL |sed s#github.com/#api.github.com/repos/#)/commits"
++                        pull_url="$(echo $temp_url |sed s#pull#pulls#)"
+ 
+-                    IFS=$'\n'
+-                    for m in $(curl -s "$pull_url" | grep "message") ; do
+-                        if echo "$m" | grep -qi signed-off-by:
+-                        then
+-                          continue
+-                        else
+-                          echo "FAIL: Missing Signed-Off Field"
+-                          echo "$m"
+-                          exit 1
+-                        fi
+-                    done
+-                    unset IFS;
+-                fi
+-            '''
++                        IFS=$'\n'
++                        for m in $(curl -s "$pull_url" | grep "message") ; do
++                            if echo "$m" | grep -qi signed-off-by:
++                            then
++                              continue
++                            else
++                              echo "FAIL: Missing Signed-Off Field"
++                              echo "$m"
++                              exit 1
++                            fi
++                        done
++                        unset IFS;
++                    fi
++                '''
++            }
+         }
+ 
+-        // Set the ISOLATION_ID environment variable for the whole pipeline
+-        env.ISOLATION_ID = sh(returnStdout: true, script: 'printf $BUILD_TAG | sha256sum | cut -c1-64').trim()
++        stage('Fetch Tags') {
++            steps {
++                sh 'git fetch --tag'
++            }
++        }
+ 
+-        // Use a docker container to build and protogen, so that the Jenkins
+-        // environment doesn't need all the dependencies.
+-        stage("Build Test Dependencies") {
+-            sh 'docker-compose -f docker-compose-installed.yaml build --force-rm'
++        stage('Build Test Dependencies') {
++            steps {
++                sh 'docker-compose -f docker-compose-installed.yaml build --force-rm'
++            }
++        }
++
++        stage('Create Git Archive') {
++            steps {
++                sh '''
++                    REPO=$(git remote show -n origin | grep Fetch | awk -F'[/.]' '{print $6}')
++                    VERSION=`git describe --dirty`
++                    git archive HEAD --format=zip -9 --output=$REPO-$VERSION.zip
++                    git archive HEAD --format=tgz -9 --output=$REPO-$VERSION.tgz
++                '''
++            }
+         }
+ 
+-        stage("Create git archive") {
+-            sh '''
+-                REPO=$(git remote show -n origin | grep Fetch | awk -F'[/.]' '{print $6}')
+-                VERSION=`git describe --dirty`
+-                git archive HEAD --format=zip -9 --output=$REPO-$VERSION.zip
+-                git archive HEAD --format=tgz -9 --output=$REPO-$VERSION.tgz
+-            '''
++        stage ('Build Documentation') {
++            steps {
++                sh 'docker build . -f docs/supply-chain-build-docs -t supply-chain-build-docs:$ISOLATION_ID'
++                sh 'docker run --rm -v $(pwd):/project/sawtooth-supply-chain supply-chain-build-docs:$ISOLATION_ID'
++            }
+         }
+ 
+-        stage ("Build documentation") {
+-            sh 'docker build . -f docs/supply-chain-build-docs -t supply-chain-build-docs:$ISOLATION_ID'
+-            sh 'docker run --rm -v $(pwd):/project/sawtooth-supply-chain supply-chain-build-docs:$ISOLATION_ID'
++        stage('Build Archive Artifacts') {
++            steps {
++                sh 'mkdir -p build/debs'
++                sh 'docker run -v $(pwd)/build/debs:/build supply-tp-installed:$ISOLATION_ID bash -c "cp /tmp/supply-chain-tp*.deb /build"'
++            }
+         }
++    }
+ 
+-        stage("Archive Build artifacts") {
+-            sh 'mkdir -p build/debs'
+-            sh 'docker run -v $(pwd)/build/debs:/build supply-tp-installed:$ISOLATION_ID bash -c "cp /tmp/supply-chain-tp*.deb /build"'
+-            archiveArtifacts artifacts: '*.tgz, *.zip'
+-            archiveArtifacts artifacts: 'build/debs/*.deb'
+-            archiveArtifacts artifacts: 'docs/build/html/**, docs/build/latex/*.pdf'
++    post {
++        success {
++            archiveArtifacts '*.tgz, *.zip, build/debs/*.deb, docs/build/html/**, docs/build/latex/*.pdf'
++        }
++        aborted {
++            error "Aborted, exiting now"
++        }
++        failure {
++            error "Failed, exiting now"
+         }
+     }
+ }
+diff --git a/MAINTAINERS.md b/MAINTAINERS.md
+new file mode 100644
+index 00000000..d0138e72
+--- /dev/null
++++ b/MAINTAINERS.md
+@@ -0,0 +1,13 @@
++| Name | GitHub | RocketChat |
++| --- | --- | --- |
++| Andi Gunderson | agunde406 | agunde |
++| Anne Chenette | chenette | achenette |
++| Boyd Johnson | boydjohnson | boydjohnson |
++| Dan Middleton | dcmiddle | Dan |
++| Darian Plumb | dplumb94 | dplumb |
++| James Mitchell | jsmitchell | jsmitchell |
++| Peter Schwarz | peterschwarz | pschwarz |
++| Ryan Banks | RyanLassigBanks | RyanBanks |
++| Ryan Beck-Buysse | rbuysse | rbuysse |
++| Shawn Amundson | vaporos | amundson |
++| Zac Delventhal | delventhalz | zac |
+diff --git a/README.md b/README.md
+index 2636d01e..3d640e4e 100644
+--- a/README.md
++++ b/README.md
+@@ -1,212 +1 @@
+-
+-![Hyperledger Sawtooth](images/sawtooth_logo_light_blue-small.png)
+-
+-# Sawtooth Supply Chain
+-
+-This is a distributed application to help you trace the provenance and other
+-contextual information of any asset. It can be used as-is or customized for
+-different use cases. This distributed application runs on top of Hyperledger
+-Sawtooth, an enterprise blockchain. To learn more about Hyperledger Sawtooth
+-please see its
+-[sawtooth-core repo](https://github.com/hyperledger/sawtooth-core) or its
+-[published docs](https://sawtooth.hyperledger.org/docs/).
+-
+-## Contents
+-
+-- [Components](#components)
+-- [Usage](#usage)
+-  - [Start Up](#start-up)
+-  - [Running Scripts in the Shell](#running-scripts-in-the-shell)
+-  - [Configuring API Keys and Secrets](#configuring-api-keys-and-secrets)
+-- [Development](#development)
+-  - [Restarting Components](#restarting-components)
+-  - [Manually Building Generated Files](#manually-building-generated-files)
+-- [Documentation](#documentation)
+-- [License](#license)
+-
+-## Components
+-
+-Running alongside the core components from Hyperledger Sawtooth, Supply Chain
+-includes a number of elements customizing the blockchain and user interaction
+-with it:
+-
+-- a **transaction processor** which handles Supply Chain transaction logic
+-- a **server** which provides an HTTP/JSON API for Supply Chain actions
+-- a **ledger sync** which syncs blockchain data to a local database
+-- the **AssetTrack** example client for tracking generic assets
+-- the **FishNet** example client for tracking fish from catch to table
+-- a **shell** container with the dependencies to run any commands and scripts
+-
+-
+-## Usage
+-
+-This project utilizes [Docker](https://www.docker.com/what-docker) to simplify
+-dependencies and deployment. After cloning this repo, follow the instructions
+-specific to your OS to install and run whatever components are required to use
+-`docker` and `docker-compose` from your command line. This is only dependency
+-required to run Supply Chain components.
+-
+-### Start Up
+-
+-Once Docker is installed and you've cloned this repo, navigate to the root
+-project directory and run:
+-
+-```bash
+-docker-compose up
+-```
+-
+-This will take awhile the first time it runs, but when complete will be running
+-all required components in separate containers. Many of the components will be
+-available through HTTP endpoints, including:
+-
+-- The Supply Chain REST API will be at **http://localhost:8020**
+-- AssetTrack will be at **http://localhost:8021**
+-- FishNet will be at **http://localhost:8022**
+-- RethinkDB's admin panel will be available at **http://localhost:8023**
+-- Sawtooth's blockchain REST API will be available at **http://localhost:8024**
+-
+-In bash you can shutdown these components with the key combination: `ctrl-C`.
+-You can shutdown _and_ remove the containers (destroying their data), with the
+-command:
+-
+-```bash
+-docker-compose down
+-```
+-
+-### Running Scripts in the Shell
+-
+-Running `docker-compose up`, will automatically run all scripts necessary to
+-use all Supply Chain components. However if you want to run any additional
+-scripts, such as scripts to automatically update sample blockchain data, a shell
+-container is provided with all necessary dependencies installed. To enter the
+-shell, simply open a terminal window and run:
+-
+-```bash
+-docker exec -it supply-shell bash
+-```
+-
+-Once inside the shell, you might try running the one of the update scripts to
+-see live updates populate in an example web app. First navigate to the server
+-directory:
+-
+-```bash
+-cd server/
+-```
+-
+-Then run one of the two provided npm scripts:
+-
+-```bash
+-npm run update-sample-assets
+-npm run update-sample-fish
+-```
+-
+-You can customize how many updates are submitted per minute with the `RATE`
+-environment variable (default 6), and use `LIMIT` to stop the updates after a
+-certain number are submitted (default 25):
+-
+-```bash
+-RATE=3 LIMIT=10 npm run update-sample-assets
+-```
+-
+-If you just want to exit the shell, you can simply run:
+-
+-```bash
+-exit
+-```
+-
+-### Configuring API Keys and Secrets
+-
+-While the Server runs out of the box with sensible defaults, there are a number
+-of secrets and API keys which will not be secure unless set explicitly. While
+-this is fine for demo purposes, any actual deployment set the following
+-properties:
+-
+-- **JWT_SECRET**: can be any random string
+-- **PRIVATE_KEY**: must be 64 random hexadecimal characters
+-- **MAPS_API_KEY**: provided by [Google Maps](https://developers.google.com/maps/documentation/javascript/get-api-key)
+-
+-These properties can be set one of two ways, through an environment variable,
+-or (preferably) by creating a file named `config.json` file in the `server/`
+-directory. A file named `config.json.example` is provided which should provide
+-a template to follow.
+-
+-## Development
+-
+-### Restarting Components
+-
+-The default Docker containers use the `volumes` command to link directly to the
+-source code on your host machine. As a result any changes you make will
+-immediately be reflected in Supply Chain components without having to rebuild
+-them. However, typically you _will_ have to restart a component before it can
+-take advantage of any changes. Rather than restarting every container, you can
+-restart a single component from separate terminal using the container name. For
+-example:
+-
+-```bash
+-docker restart supply-server
+-```
+-
+-The available container names include:
+-- supply-shell
+-- supply-processor
+-- supply-server
+-- supply-asset-client
+-- supply-fish-client
+-- supply-rethink
+-- supply-validator
+-- supply-settings-tp
+-- supply-rest-api
+-
+-### Manually Building Generated Files
+-
+-The example clients are based on static files generated by build scripts. Any
+-time changes are made to their source code they will need to be rebuilt. This
+-is done automatically on `up`, but if you make changes to these files and wish
+-to rebuild the generated files immediately, you can do so from within the
+-Supply Chain Shell:
+-
+-```bash
+-docker exec -it supply-shell bash
+-```
+-
+-Once in the shell, you can generate the necessary JS files by navigating to a
+-client's directory and running its build script:
+-
+-```bash
+-cd asset_client/
+-npm run build
+-```
+-
+-```bash
+-cd fish_client/
+-npm run build
+-```
+-
+-Unlike other components, the clients do _not_ typically need to be restarted in
+-order to reflect changes, just rebuild the static files and refresh your
+-browser (the browser cache may have to be emptied).
+-
+-#### Building Protobuf Files
+-
+-Files in the `protos/` directory are used to generate classes for all of the
+-other components. If any changes are made in this directory, these classes will
+-need to be rebuilt for all components. While this can be done manually, the
+-necessary commands are included in `docker-compose.yaml`, so simply stop all
+-containers with `ctrl-C` and then `docker-compose up` again.
+-
+-## Documentation
+-
+-The latest documentation for Sawtooth Supply Chain is available within this
+-repo in the [docs](docs) subdirectory.
+-
+-## License
+-
+-Hyperledger Sawtooth software is licensed under the
+-[Apache License Version 2.0](LICENSE) software license.
+-
+-Hyperledger Sawtooth Supply Chain documentation in the [docs](docs)
+-subdirectory is licensed under a Creative Commons Attribution 4.0 International
+-License.  You may obtain a copy of the license at:
+-http://creativecommons.org/licenses/by/4.0/.
+-
+-![Open Source Award Badge](images/rookies16-small.png)
++This repository has been superceded by the [Hyperledger Grid](https://github.com/hyperledger/grid) project.
+diff --git a/SECURITY.md b/SECURITY.md
+new file mode 100644
+index 00000000..2f4eba8a
+--- /dev/null
++++ b/SECURITY.md
+@@ -0,0 +1,23 @@
++# Hyperledger Security Policy
++
++## Reporting a Security Bug
++
++If you think you have discovered a security issue in any of the Hyperledger
++projects, we'd love to hear from you. We will take all security bugs
++seriously and if confirmed upon investigation we will patch it within a
++reasonable amount of time and release a public security bulletin discussing
++the impact and credit the discoverer.
++
++There are two ways to report a security bug. The easiest is to email a
++description of the flaw and any related information (e.g. reproduction
++steps, version) to
++[security at hyperledger dot org](mailto:security@hyperledger.org).
++
++The other way is to file a confidential security bug in our
++[JIRA bug tracking system](https://jira.hyperledger.org).
++Be sure to set the “Security Level” to “Security issue”.
++
++The process by which the Hyperledger Security Team handles security bugs
++is documented further in our
++[Defect Response](https://wiki.hyperledger.org/display/HYP/Defect+Response)
++page on our [wiki](https://wiki.hyperledger.org).
+diff --git a/asset_client/package.json b/asset_client/package.json
+index 6a0b1353..4d5b0bc4 100644
+--- a/asset_client/package.json
++++ b/asset_client/package.json
+@@ -42,7 +42,8 @@
+     "sass-loader": "^6.0.6",
+     "standard": "^10.0.3",
+     "style-loader": "^0.18.2",
+-    "webpack": "^3.5.5",
+-    "webpack-dev-server": "^2.7.1"
++    "webpack": "^4.30.0",
++    "webpack-cli": "^3.3.1",
++    "webpack-dev-server": ">=3.1.11"
+   }
+ }
+diff --git a/bin/build_all b/bin/build_all
+deleted file mode 100755
+index 0ff00a22..00000000
+--- a/bin/build_all
++++ /dev/null
+@@ -1,116 +0,0 @@
+-#!/bin/bash
+-#
+-# Copyright 2017 Intel Corporation
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-# ------------------------------------------------------------------------------
+-
+-# Exit on non-zero exit code from subcommand
+-set -e
+-
+-usage() {
+-    echo "Usage:"
+-    echo "  $0"
+-    echo
+-    echo "Options:"
+-    echo "  -h            print usage and exit"
+-}
+-
+-info() {
+-    echo -e "\033[0;36m\n[--- $1 ---]\n\033[0m"
+-}
+-
+-warn() {
+-    echo -e "\033[0;31m\n[--- $1 ---]\n\033[0m"
+-}
+-
+-while getopts :x:l:h opt
+-do
+-    case $opt in
+-        h)
+-            usage
+-            exit 0
+-            ;;
+-
+-        \?)
+-            echo "Invalid option: -$OPTARG" >&2
+-            usage
+-            exit 1
+-            ;;
+-    esac
+-done
+-shift $(($OPTIND-1))
+-
+-main() {
+-    # Set project directory relative to this file
+-    top_dir=$(cd $(dirname $(dirname $0)) && pwd)
+-
+-    # Start in project directory
+-    cd $top_dir
+-
+-    docker_build server/Dockerfile . supply-chain-server
+-    docker_build docker/supply-chain-dev-python . supply-chain-dev-python
+-    docker_build processor/Dockerfile processor/ supply-tp
+-    docker_build docker/supply-chain-dev-rust . supply-chain-dev-rust
+-    docker_run supply-chain-dev-rust
+-}
+-
+-docker_run() {
+-    image=$1
+-
+-    if [ -z $ISOLATION_ID ]; then
+-        tag=$image
+-    else
+-        tag=$image:$ISOLATION_ID
+-    fi
+-
+-    info "Running $image"
+-    if [ -z $BUILD_TAG ]
+-    then
+-        docker run -t --rm -v $top_dir:/project/sawtooth-supply-chain \
+-            --env https_proxy=$https_proxy \
+-            --env http_proxy=$http_proxy \
+-            --env HTTPS_PROXY=$HTTPS_PROXY \
+-            --env HTTP_PROXY=$HTTP_PROXY \
+-            $tag
+-    else
+-        docker run --rm -v $top_dir:/project/sawtooth-supply-chain \
+-            --env https_proxy=$https_proxy \
+-            --env http_proxy=$http_proxy \
+-            --env HTTPS_PROXY=$HTTPS_PROXY \
+-            --env HTTP_PROXY=$HTTP_PROXY \
+-            $tag
+-    fi
+-}
+-
+-docker_build() {
+-    image=$1
+-    context=$2
+-    tag=$3
+-
+-    if [ ! -z $ISOLATION_ID ]
+-    then
+-        tag=$tag:$ISOLATION_ID
+-    fi
+-
+-    info "Building $tag from $image"
+-
+-    # Build the image and pass in any proxy information if set
+-    docker build -f $image -t $tag $context \
+-        --build-arg https_proxy=$https_proxy \
+-        --build-arg http_proxy=$http_proxy \
+-        --build-arg HTTPS_PROXY=$HTTPS_PROXY \
+-        --build-arg HTTP_PROXY=$HTTP_PROXY
+-}
+-
+-main
+diff --git a/bin/build_rust b/bin/build_rust
+deleted file mode 100755
+index c0499b12..00000000
+--- a/bin/build_rust
++++ /dev/null
+@@ -1,25 +0,0 @@
+-#!/bin/bash
+-# Copyright 2018 Cargill Incorporated
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-set -e
+-
+-top_dir=$(cd $(dirname $(dirname $0)) && pwd)
+-
+-echo -e "\033[0;32m--- Building supply-chain-tp ---\n\033[0m"
+-
+-rm -rf $top_dir/processor/bin/
+-mkdir -p $top_dir/processor/bin/
+-cd $top_dir/processor/
+-cargo build && cp ./target/debug/supply-chain-tp $top_dir/processor/bin/supply-chain-tp
+diff --git a/docker-compose-installed.yaml b/docker-compose-installed.yaml
+index b66bbdf8..495486e1 100644
+--- a/docker-compose-installed.yaml
++++ b/docker-compose-installed.yaml
+@@ -22,7 +22,7 @@ services:
+     container_name: supply-tp-installed
+     build:
+       context: .
+-      dockerfile: processor/Dockerfile-installed
++      dockerfile: processor/Dockerfile-installed-${DISTRO}
+       args:
+         - http_proxy
+         - https_proxy
+@@ -36,7 +36,7 @@ services:
+     container_name: supply-server-installed
+     build:
+       context: .
+-      dockerfile: server/Dockerfile-installed
++      dockerfile: server/Dockerfile-installed-${DISTRO}
+       args:
+         - http_proxy
+         - https_proxy
+@@ -63,7 +63,7 @@ services:
+     container_name: supply-ledger-sync-installed
+     build:
+       context: .
+-      dockerfile: ledger_sync/Dockerfile-installed
++      dockerfile: ledger_sync/Dockerfile-installed-${DISTRO}
+     depends_on:
+       - validator
+       - rethink
+diff --git a/docker/build/build_debs b/docker/build/build_debs
+deleted file mode 100755
+index 35c8269e..00000000
+--- a/docker/build/build_debs
++++ /dev/null
+@@ -1,36 +0,0 @@
+-#!/bin/bash
+-
+-set -e
+-
+-main() {
+-    top_dir=$(cd $(dirname $(dirname $(dirname $0))) && pwd)
+-    pkg_dir=$top_dir/build/debs
+-    mkdir -p $pkg_dir
+-    rm -f $pkg_dir/*.deb
+-
+-PACKAGES='
+-    protogen
+-    processor
+-'
+-    for PACKAGE in $PACKAGES
+-    do
+-        build_package $PACKAGE
+-    done
+-}
+-
+-info() {
+-    echo -e "\033[0;35m\n[--- $1 ---]\n\033[0m"
+-}
+-
+-build_package() {
+-    tag=$1
+-    if [ ! -z $ISOLATION_ID ]
+-    then
+-        tag=$tag:$ISOLATION_ID
+-    fi
+-
+-    info "running $tag"
+-    docker run --rm -v $(pwd):/project/sawtooth-supply-chain $tag
+-}
+-
+-main
+diff --git a/docker/build/build_images b/docker/build/build_images
+deleted file mode 100755
+index ae2d0ebe..00000000
+--- a/docker/build/build_images
++++ /dev/null
+@@ -1,36 +0,0 @@
+-#!/bin/bash
+-
+-main() {
+-    # Set project directory relative to this file
+-    top_dir=$(cd $(dirname $(dirname $(dirname $0))) && pwd)
+-
+-    IMAGES='
+-        protogen
+-        processor
+-    '
+-
+-    for IMAGE in $IMAGES
+-    do
+-        build_image $IMAGE
+-    done
+-}
+-
+-info() {
+-    echo -e "\033[0;35m\n[--- $1 ---]\n\033[0m"
+-}
+-
+-build_image() {
+-    cd $top_dir/docker/build/$1
+-
+-    if [ -z $ISOLATION_ID ]; then
+-        tag=$1
+-    else
+-        tag=$1:$ISOLATION_ID
+-    fi
+-
+-    info "building $1 image"
+-    docker build -t $tag .
+-    cd ..
+-}
+-
+-main
+diff --git a/docker/build/processor/Dockerfile b/docker/build/processor/Dockerfile
+deleted file mode 100644
+index 4f4769ba..00000000
+--- a/docker/build/processor/Dockerfile
++++ /dev/null
+@@ -1,32 +0,0 @@
+-# Copyright 2017 Intel Corporation
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-# ------------------------------------------------------------------------------
+-
+-ARG iso_id=latest
+-FROM ubuntu:xenial
+-
+-RUN echo "deb http://repo.sawtooth.me/ubuntu/0.8/stable xenial universe" >> /etc/apt/sources.list \
+- && (apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8AA7AF1F1091A5FD \
+- || apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 8AA7AF1F1091A5FD) \
+- && apt-get update \
+- && apt-get install -y -q --allow-downgrades \
+-    git \
+-    python3 \
+-    python3-colorlog \
+-    python3-protobuf \
+-    python3-sawtooth-sdk \
+-    python3-stdeb
+-
+-ENV VERSION=AUTO_STRICT
+-CMD [ "/project/sawtooth-supply-chain/docker/build/processor/processor" ]
+diff --git a/docker/build/processor/processor b/docker/build/processor/processor
+deleted file mode 100755
+index fd31c73a..00000000
+--- a/docker/build/processor/processor
++++ /dev/null
+@@ -1,51 +0,0 @@
+-#!/bin/bash
+-#
+-# Copyright 2016, 2017 Intel Corporation
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-# ------------------------------------------------------------------------------
+-
+-set -e
+-
+-info() {
+-    echo -e "\033[0;35m\n[--- $1 ---]\n\033[0m"
+-}
+-
+-info "Building processor deb"
+-
+-# 1. Set PYTHONPATH required for unit tests
+-export PYTHONPATH=$pypath
+-
+-cd /project/sawtooth-supply-chain/processor
+-
+-# 2. Cleanup previous builds
+-if [ -d "debian" ]
+-then
+-    rm -rf debian
+-fi
+-python3 setup.py clean --all
+-
+-
+-# 2. Build the package
+-python3 setup.py --command-packages=stdeb.command debianize
+-
+-if [ -d "packaging/ubuntu" ]
+-then
+-    cp -R packaging/ubuntu/* debian/
+-fi
+-
+-dpkg-buildpackage -b -rfakeroot -us -uc
+-
+-# 3. Install the package
+-dpkg -i ../*.deb
+-mv ../*.deb /project/sawtooth-supply-chain/build/debs
+diff --git a/docker/build/protogen/Dockerfile b/docker/build/protogen/Dockerfile
+deleted file mode 100644
+index 8ef6d20c..00000000
+--- a/docker/build/protogen/Dockerfile
++++ /dev/null
+@@ -1,34 +0,0 @@
+-# Copyright 2017 Intel Corporation
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-# ------------------------------------------------------------------------------
+-
+-
+-ARG iso_id=latest
+-FROM ubuntu:${iso_id}
+-
+-# Add sawtooth repo
+-RUN echo "deb http://repo.sawtooth.me/ubuntu/ci xenial universe" >> /etc/apt/sources.list \
+- && (apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8AA7AF1F1091A5FD \
+- || apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 8AA7AF1F1091A5FD) \
+- && apt-get update \
+- && apt-get install -y -q --allow-downgrades \
+-    python3 \
+-    libprotobuf12 \
+-    python3-grpcio \
+-    python3-grpcio-tools \
+-    python3-pkg-resources \
+-    python3-protobuf \
+-    python3-six
+-
+-CMD [ "/project/sawtooth-supply-chain/bin/protogen" ]
+diff --git a/docker/supply-chain-dev-python b/docker/supply-chain-dev-python
+deleted file mode 100644
+index 9b3e8561..00000000
+--- a/docker/supply-chain-dev-python
++++ /dev/null
+@@ -1,75 +0,0 @@
+-# Copyright 2017 Intel Corporation
+-# Copyright 2018 Cargill Incorporated
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-# ------------------------------------------------------------------------------
+-
+-# Description:
+-#   Builds an image to be used when developing in Python. The default CMD is to
+-#   run build_python.
+-#
+-#   The image is also used by unit and integration tests. Docker is used to
+-#   interact with and orchestrate the creation of other docker containers.
+-#
+-
+-FROM ubuntu:xenial
+-
+-LABEL "install-type"="mounted"
+-
+- RUN echo "deb http://repo.sawtooth.me/ubuntu/1.0/stable xenial universe" >> /etc/apt/sources.list \
+-  && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8AA7AF1F1091A5FD \
+- && apt-get update \
+- && apt-get install -y -q \
+-    apt-transport-https \
+-    build-essential \
+-    ca-certificates \
+-    curl \
+-    git \
+-    inetutils-ping \
+-    libffi-dev \
+-    libssl-dev \
+-    pep8 \
+-    python3-cbor \
+-    python3-colorlog \
+-    python3-dev \
+-    python3-nose2 \
+-    python3-sawtooth-sdk \
+-    python3-pip \
+-    python3-protobuf \
+-    software-properties-common \
+- && apt-get clean \
+- && rm -rf /var/lib/apt/lists/* \
+- && pip3 install \
+-    pylint \
+-    bandit \
+-    requests \
+-    coverage --upgrade
+-
+-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - \
+- && add-apt-repository \
+-   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+-      $(lsb_release -cs) \
+-         stable"
+-
+-RUN apt-get update && apt-get install -y -q \
+-    docker-ce \
+- && apt-get clean \
+- && rm -rf /var/lib/apt/lists/*
+-
+-EXPOSE 4004/tcp
+-EXPOSE 8080
+-
+-ENV PATH=$PATH:/project/sawtooth-supply-chain/bin
+-
+-WORKDIR /project/sawtooth-supply-chain
+-CMD build_python
+diff --git a/docker/supply-chain-dev-rust b/docker/supply-chain-dev-rust
+deleted file mode 100644
+index 7e82ad5f..00000000
+--- a/docker/supply-chain-dev-rust
++++ /dev/null
+@@ -1,48 +0,0 @@
+-# Copyright 2018 Cargill Incorporated
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-FROM ubuntu:xenial
+-
+-LABEL "install-type"="mounted"
+-
+-RUN echo "deb http://repo.sawtooth.me/ubuntu/ci xenial universe" >> /etc/apt/sources.list \
+- && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8AA7AF1F1091A5FD \
+- && apt-get update \
+- && apt-get install -y -q --allow-downgrades \
+-    build-essential \
+-    curl \
+-    libssl-dev \
+-    gcc \
+-    libzmq3-dev \
+-    openssl \
+-    pkg-config \
+-    python3-grpcio-tools=1.1.3-1 \
+-    unzip \
+- && apt-get clean \
+- && rm -rf /var/lib/apt/lists/*
+-
+-RUN curl -OLsS https://github.com/google/protobuf/releases/download/v3.5.1/protoc-3.5.1-linux-x86_64.zip \
+- && unzip protoc-3.5.1-linux-x86_64.zip -d protoc3 \
+- && rm protoc-3.5.1-linux-x86_64.zip
+-
+-RUN curl https://sh.rustup.rs -sSf > /usr/bin/rustup-init \
+- && chmod +x /usr/bin/rustup-init \
+- && rustup-init -y
+-
+-ENV PATH=$PATH:/protoc3/bin:project/sawtooth-supply-chain/bin:/root/.cargo/bin \
+-    CARGO_INCREMENTAL=0
+-
+-WORKDIR /
+-
+-CMD build_rust
+diff --git a/docs/supply-chain-build-docs b/docs/supply-chain-build-docs
+index a547811d..39d05c15 100644
+--- a/docs/supply-chain-build-docs
++++ b/docs/supply-chain-build-docs
+@@ -26,14 +26,18 @@
+ #   $ cd sawtooth-supply-chain
+ #   $ docker run -v $(pwd):/project/sawtooth-supply-chain supply-chain-build-docs
+ 
+-FROM ubuntu:xenial
++FROM ubuntu:bionic
+ 
+-RUN echo "deb http://repo.sawtooth.me/ubuntu/ci xenial universe" >> /etc/apt/sources.list \
++RUN apt-get update \
++  && apt-get install gnupg -y
++
++RUN echo "deb http://repo.sawtooth.me/ubuntu/ci bionic universe" >> /etc/apt/sources.list \
+  && apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 8AA7AF1F1091A5FD \
+  && apt-get update \
+- && apt-get install -y -q --allow-downgrades \
++ && apt-get install -y -q \
+     build-essential \
+     git \
++    latexmk \
+     pep8 \
+     python3-colorlog \
+     python3-dev \
+@@ -45,13 +49,15 @@ RUN echo "deb http://repo.sawtooth.me/ubuntu/ci xenial universe" >> /etc/apt/sou
+     pylint \
+     bandit
+ 
++ENV DEBIAN_FRONTEND=noninteractive
++
+ # Install jsdoc
+ RUN apt-get update && apt-get install -y -q --no-install-recommends \
+     curl \
+  && curl -s -S -o /tmp/setup-node.sh https://deb.nodesource.com/setup_6.x \
+  && chmod 755 /tmp/setup-node.sh \
+  && /tmp/setup-node.sh \
+- && apt-get install nodejs -y -q \
++ && apt-get install nodejs npm -y -q \
+  && rm /tmp/setup-node.sh \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* \
+@@ -70,7 +76,7 @@ RUN apt-get update && apt-get install -y -q \
+     && apt-get clean \
+     && rm -rf /var/lib/apt/lists/* \
+     && pip3 install \
+-    sphinx==1.5.6 \
++    sphinx \
+     sphinxcontrib-httpdomain \
+     sphinxcontrib-openapi \
+     sphinx_rtd_theme
+diff --git a/fish_client/package.json b/fish_client/package.json
+index 15230659..9fdb4b57 100644
+--- a/fish_client/package.json
++++ b/fish_client/package.json
+@@ -42,7 +42,8 @@
+     "sass-loader": "^6.0.6",
+     "standard": "^10.0.3",
+     "style-loader": "^0.18.2",
+-    "webpack": "^3.5.5",
+-    "webpack-dev-server": "^2.7.1"
++    "webpack": "^4.30.0",
++    "webpack-cli": "^3.3.1",
++    "webpack-dev-server": ">=3.1.11"
+   }
+ }
+diff --git a/fish_client/src/components/forms.js b/fish_client/src/components/forms.js
+index 1f57ed22..82bcd712 100644
+--- a/fish_client/src/components/forms.js
++++ b/fish_client/src/components/forms.js
+@@ -109,11 +109,6 @@ const MultiSelect = {
+         m(`button.btn.btn-${color}.btn-block.dropdown-toggle.text-left`,
+           {
+             'data-toggle': 'dropdown',
+-            onclick: (e) => {
+-              e.preventDefault()
+-              vnode.state.show = !vnode.state.show
+-            },
+-            onblur: e => { vnode.state.show = false }
+           }, vnode.attrs.label),
+         m('.dropdown-menu.w-100', {className: vnode.state.show ? 'show' : ''},
+           m("a.dropdown-item[href='#']", {
+diff --git a/ledger_sync/Dockerfile b/ledger_sync/Dockerfile
+index 694e0f7e..85237d7c 100644
+--- a/ledger_sync/Dockerfile
++++ b/ledger_sync/Dockerfile
+@@ -17,7 +17,7 @@
+ #   Builds server and client node dependencies, creating a server image
+ #   which can be run with root context
+ 
+-FROM ubuntu:xenial
++FROM ubuntu:bionic
+ 
+ LABEL "install-type"="mounted"
+ 
+@@ -25,6 +25,7 @@ LABEL "install-type"="mounted"
+ RUN apt-get update && apt-get install -y -q --no-install-recommends \
+     curl \
+     ca-certificates \
++    gnupg \
+     pkg-config \
+     build-essential \
+     libzmq3-dev \
+diff --git a/ledger_sync/Dockerfile-installed-bionic b/ledger_sync/Dockerfile-installed-bionic
+new file mode 100644
+index 00000000..467b4877
+--- /dev/null
++++ b/ledger_sync/Dockerfile-installed-bionic
+@@ -0,0 +1,53 @@
++# Copyright 2017 Intel Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# ------------------------------------------------------------------------------
++
++# Description:
++#   Builds server and client node dependencies, creating a server image
++#   which can be run with root context
++
++FROM ubuntu:bionic
++
++LABEL "install-type"="mounted"
++
++RUN apt-get update \
++ && apt-get install gnupg -y
++
++# Install Node and Ubuntu dependencies
++RUN apt-get update && apt-get install -y -q --no-install-recommends \
++    curl \
++    ca-certificates \
++    pkg-config \
++    build-essential \
++    libzmq3-dev \
++ && curl -s -S -o /tmp/setup-node.sh https://deb.nodesource.com/setup_8.x \
++ && chmod 755 /tmp/setup-node.sh \
++ && /tmp/setup-node.sh \
++ && apt-get install nodejs -y -q \
++ && rm /tmp/setup-node.sh \
++ && apt-get clean \
++ && rm -rf /var/lib/apt/lists/* \
++ && npm install -g prebuild-install
++
++WORKDIR /sawtooth-supply-chain/ledger_sync
++
++COPY ledger_sync/package.json .
++RUN npm install
++
++COPY protos/ ../protos/
++COPY ledger_sync/ .
++
++EXPOSE 3000/tcp
++
++CMD ["/usr/bin/node", "index.js"]
+diff --git a/ledger_sync/Dockerfile-installed b/ledger_sync/Dockerfile-installed-xenial
+similarity index 100%
+rename from ledger_sync/Dockerfile-installed
+rename to ledger_sync/Dockerfile-installed-xenial
+diff --git a/processor/Cargo.toml b/processor/Cargo.toml
+index d7d5ffa1..7755dcba 100644
+--- a/processor/Cargo.toml
++++ b/processor/Cargo.toml
+@@ -20,7 +20,7 @@ description = "Sawtooth Supply Chain Transaction Processor"
+ homepage = "https://github.com/hyperledger/sawtooth-supply-chain"
+ 
+ [dependencies]
+-sawtooth-sdk = "^0.1"
++sawtooth-sdk = "^0.2"
+ rust-crypto = "0.2.36"
+ rustc-serialize = "0.3.22"
+ sawtooth-zmq = "0.8.2-dev5"
+diff --git a/processor/Dockerfile-installed-bionic b/processor/Dockerfile-installed-bionic
+new file mode 100644
+index 00000000..237a6f7c
+--- /dev/null
++++ b/processor/Dockerfile-installed-bionic
+@@ -0,0 +1,55 @@
++# Copyright 2018 Cargill Incorporated
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# docker build -f processor/Dockerfile-installed -t supply-chain-tp .
++
++# -------------=== supply-chain tp build ===-------------
++FROM ubuntu:bionic as supply-chain-tp-builder
++
++ENV VERSION=AUTO_STRICT
++
++RUN apt-get update \
++ && apt-get install -y \
++ curl \
++ gcc \
++ libssl-dev \
++ libzmq3-dev \
++ pkg-config \
++ unzip
++
++# For Building Protobufs
++RUN curl https://sh.rustup.rs -sSf | sh -s -- -y \
++ && curl -OLsS https://github.com/google/protobuf/releases/download/v3.5.1/protoc-3.5.1-linux-x86_64.zip \
++ && unzip protoc-3.5.1-linux-x86_64.zip -d protoc3 \
++ && rm protoc-3.5.1-linux-x86_64.zip
++
++ENV PATH=$PATH:/protoc3/bin
++RUN /root/.cargo/bin/cargo install cargo-deb
++
++COPY . /project
++
++WORKDIR /project/processor
++
++RUN /root/.cargo/bin/cargo deb
++
++# -------------=== supply-chain-tp docker build ===-------------
++FROM ubuntu:bionic
++
++COPY --from=supply-chain-tp-builder /project/processor/target/debian/supply-chain-tp*.deb /tmp
++
++RUN apt-get update \
++ && dpkg -i /tmp/supply-chain-tp*.deb || true \
++ && apt-get -f -y install
++
++CMD ["supply-chain-tp", "-vv"]
+diff --git a/processor/Dockerfile-installed b/processor/Dockerfile-installed-xenial
+similarity index 100%
+rename from processor/Dockerfile-installed
+rename to processor/Dockerfile-installed-xenial
+diff --git a/processor/src/handler.rs b/processor/src/handler.rs
+index 6e0df1b1..19d13819 100644
+--- a/processor/src/handler.rs
++++ b/processor/src/handler.rs
+@@ -1083,6 +1083,11 @@ impl SupplyChainTransactionHandler {
+                     "Only the owner can create a proposal to change ownership",
+                 )));
+             }
++            if role == proposal::Proposal_Role::REPORTER && properties.len() == 0 {
++                return Err(ApplyError::InvalidTransaction(String::from(
++                    "Property list cannot be empty for Reporter role",
++                )))
++            }
+         }
+ 
+         if role == proposal::Proposal_Role::CUSTODIAN {
+diff --git a/server/Dockerfile b/server/Dockerfile
+index 167efe10..01e2ee52 100644
+--- a/server/Dockerfile
++++ b/server/Dockerfile
+@@ -17,7 +17,7 @@
+ #   Builds server and client node dependencies, creating a server image
+ #   which can be run with root context
+ 
+-FROM ubuntu:xenial
++FROM ubuntu:bionic
+ 
+ LABEL "install-type"="mounted"
+ 
+@@ -25,6 +25,7 @@ LABEL "install-type"="mounted"
+ RUN apt-get update && apt-get install -y -q --no-install-recommends \
+     curl \
+     ca-certificates \
++    gnupg \
+     pkg-config \
+     build-essential \
+     libzmq3-dev \
+diff --git a/server/Dockerfile-installed-bionic b/server/Dockerfile-installed-bionic
+new file mode 100644
+index 00000000..e87fc356
+--- /dev/null
++++ b/server/Dockerfile-installed-bionic
+@@ -0,0 +1,57 @@
++# Copyright 2017 Intel Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# ------------------------------------------------------------------------------
++
++# Description:
++#   Builds server and client node dependencies, creating a server image
++#   which can be run with root context
++
++FROM ubuntu:bionic
++
++LABEL "install-type"="mounted"
++
++RUN apt-get update \
++ && apt-get install gnupg -y
++
++# Install Node and Ubuntu dependencies
++RUN apt-get update && apt-get install -y -q --no-install-recommends \
++    curl \
++    ca-certificates \
++    pkg-config \
++    build-essential \
++    libzmq3-dev \
++ && curl -s -S -o /tmp/setup-node.sh https://deb.nodesource.com/setup_8.x \
++ && chmod 755 /tmp/setup-node.sh \
++ && /tmp/setup-node.sh \
++ && apt-get install nodejs -y -q \
++ && rm /tmp/setup-node.sh \
++ && apt-get clean \
++ && rm -rf /var/lib/apt/lists/* \
++ && npm install -g prebuild-install
++
++WORKDIR /sawtooth-supply-chain/server
++
++COPY server/package.json .
++RUN npm install
++
++#Copy client sample data for script use
++COPY asset_client/sample_data/ ../asset_client/sample_data/
++COPY fish_client/sample_data/ ../fish_client/sample_data/
++
++COPY protos/ ../protos/
++COPY server/ .
++
++EXPOSE 3000/tcp
++
++CMD ["/usr/bin/node", "index.js"]
+diff --git a/server/Dockerfile-installed b/server/Dockerfile-installed-xenial
+similarity index 100%
+rename from server/Dockerfile-installed
+rename to server/Dockerfile-installed-xenial
+diff --git a/shell/Dockerfile b/shell/Dockerfile
+index 0790a90c..7805823a 100644
+--- a/shell/Dockerfile
++++ b/shell/Dockerfile
+@@ -13,12 +13,11 @@
+ # limitations under the License.
+ # ------------------------------------------------------------------------------
+ 
+-FROM hyperledger/sawtooth-shell:1.0
++FROM hyperledger/sawtooth-shell:nightly
+ 
+ # Install Python, Node.js, and Ubuntu dependencies
+-RUN echo "deb http://repo.sawtooth.me/ubuntu/1.0/stable xenial universe" >> /etc/apt/sources.list \
+-  && (apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8AA7AF1F1091A5FD \
+-  || apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 8AA7AF1F1091A5FD) \
++RUN (apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 44FC67F19B2466EA \
++  || apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 44FC67F19B2466EA) \
+   && apt-get update \
+   && apt-get install -y -q \
+     apt-transport-https \
+@@ -30,16 +29,16 @@ RUN echo "deb http://repo.sawtooth.me/ubuntu/1.0/stable xenial universe" >> /etc
+     python3 \
+     python3-colorlog \
+     python3-dev \
+-    python3-grpcio-tools=1.1.3-1 \
+-    python3-grpcio=1.1.3-1 \
++    python3-grpcio-tools \
++    python3-grpcio \
+     python3-nose2 \
+     python3-pip \
+     python3-protobuf \
+-    python3-pytest-runner=2.6.2-1 \
+-    python3-pytest=2.9.0-1 \
++    python3-pytest-runner \
++    python3-pytest \
+     python3-sawtooth-sdk \
+     python3-sawtooth-signing \
+-    python3-setuptools-scm=1.15.0-1 \
++    python3-setuptools-scm \
+     python3-yaml \
+     software-properties-common \
+   && curl -s -S -o /tmp/setup-node.sh https://deb.nodesource.com/setup_8.x \
+diff --git a/shell/Dockerfile-installed-bionic b/shell/Dockerfile-installed-bionic
+new file mode 100644
+index 00000000..6026fdde
+--- /dev/null
++++ b/shell/Dockerfile-installed-bionic
+@@ -0,0 +1,90 @@
++# Copyright 2017 Intel Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# ------------------------------------------------------------------------------
++
++FROM hyperledger/sawtooth-shell:nightly
++
++# Install Python, Node.js, and Ubuntu dependencies
++RUN (apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 44FC67F19B2466EA \
++  || apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 44FC67F19B2466EA) \
++  && apt-get update \
++  && apt-get install -y -q \
++    apt-transport-https \
++    build-essential \
++    ca-certificates \
++    curl \
++    libzmq3-dev \
++    pkg-config \
++    python3 \
++    python3-colorlog \
++    python3-dev \
++    python3-grpcio-tools \
++    python3-grpcio \
++    python3-nose2 \
++    python3-pip \
++    python3-protobuf \
++    python3-pytest-runner \
++    python3-pytest \
++    python3-sawtooth-sdk \
++    python3-sawtooth-signing \
++    python3-setuptools-scm \
++    python3-yaml \
++    software-properties-common \
++  && curl -s -S -o /tmp/setup-node.sh https://deb.nodesource.com/setup_8.x \
++  && chmod 755 /tmp/setup-node.sh \
++  && /tmp/setup-node.sh \
++  && apt-get install nodejs -y -q \
++  && rm /tmp/setup-node.sh \
++  && apt-get clean \
++  && rm -rf /var/lib/apt/lists/* \
++  && npm install -g prebuild-install
++
++WORKDIR /sawtooth-supply-chain
++
++# Install NPM dependencies to central location, link to individual components
++COPY bin/splice_json bin/
++COPY asset_client/ asset_client/
++COPY fish_client/ fish_client/
++COPY protos/ protos/
++COPY server/ server/
++
++RUN \
++ if [ ! -z $HTTP_PROXY ] && [ -z $http_proxy ]; then \
++  http_proxy=$HTTP_PROXY; \
++ fi; \
++ if [ ! -z $HTTPS_PROXY ] && [ -z $https_proxy ]; then \
++  https_proxy=$HTTPS_PROXY; \
++ fi; \
++ if [ ! -z $http_proxy ]; then \
++  npm config set proxy $http_proxy; \
++ fi; \
++ if [ ! -z $https_proxy ]; then \
++  npm config set https-proxy $https_proxy; \
++ fi
++
++
++RUN mkdir /node_deps \
++  && bin/splice_json \
++    asset_client/package.json \
++    fish_client/package.json \
++    server/package.json \
++    > /node_deps/package.json \
++  && cd /node_deps && npm install && cd - \
++  && ln -s /node_deps/node_modules asset_client/ \
++  && ln -s /node_deps/node_modules fish_client/ \
++  && ln -s /node_deps/node_modules server/
++
++ENV PATH $PATH:/sawtooth-supply-chain/bin
++
++CMD ["tail", "-f", "/dev/null"]
+diff --git a/shell/Dockerfile-installed b/shell/Dockerfile-installed-xenial
+similarity index 100%
+rename from shell/Dockerfile-installed
+rename to shell/Dockerfile-installed-xenial

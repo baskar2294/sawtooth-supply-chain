@@ -61,7 +61,7 @@ const AddFishForm = {
                  _handleSubmit(vnode.attrs.signingKey, vnode.state)
                }
              },
-             m('legend', 'Track New Fish'),
+             m('legend', 'Track New Reagent'),
              _formGroup('Serial Number', m('input.form-control', {
                type: 'text',
                oninput: m.withAttr('value', (value) => {
@@ -69,7 +69,7 @@ const AddFishForm = {
                }),
                value: vnode.state.serialNumber
              })),
-             _formGroup('Specie (ASFIS 3-letter code)', m('input.form-control', {
+             _formGroup('Species (ASFIS 3-letter code)', m('input.form-control', {
                type: 'text',
                oninput: m.withAttr('value', (value) => {
                  vnode.state.species = value
