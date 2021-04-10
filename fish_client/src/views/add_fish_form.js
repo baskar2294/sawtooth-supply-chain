@@ -216,7 +216,7 @@ const _handleSubmit = (signingKey, state) => {
     }))
 
   transactions.submit([recordPayload].concat(reporterPayloads), true)
-    .then(() => m.route.set(`/fish/${state.serialNumber}`))
+    .then(() => m.route.set(`/reagent/${state.serialNumber}`))
 }
 
 /**

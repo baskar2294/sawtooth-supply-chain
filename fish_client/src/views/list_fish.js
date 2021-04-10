@@ -67,7 +67,7 @@ const FishList = {
             vnode.state.currentPage * PAGE_SIZE,
             (vnode.state.currentPage + 1) * PAGE_SIZE)
                 .map((rec) => [
-                  m(`a[href=/fish/${rec.recordId}]`, {
+                  m(`a[href=/reagent/${rec.recordId}]`, {
                     oncreate: m.route.link
                   }, truncate(rec.recordId, { length: 32 })),
                   getPropertyValue(rec, 'species'),
