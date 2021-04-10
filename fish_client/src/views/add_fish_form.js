@@ -61,7 +61,7 @@ const AddFishForm = {
                  _handleSubmit(vnode.attrs.signingKey, vnode.state)
                }
              },
-             m('legend', 'Track New Reagent'),
+             m('legend', 'Add Reagent Details'),
              _formGroup('Serial Number', m('input.form-control', {
                type: 'text',
                oninput: m.withAttr('value', (value) => {
@@ -69,7 +69,7 @@ const AddFishForm = {
                }),
                value: vnode.state.serialNumber
              })),
-             _formGroup('Species (ASFIS 3-letter code)', m('input.form-control', {
+             _formGroup('Reagent Name', m('input.form-control', {
                type: 'text',
                oninput: m.withAttr('value', (value) => {
                  vnode.state.species = value
@@ -78,8 +78,8 @@ const AddFishForm = {
              })),
 
              layout.row([
-               _formGroup('Length (m)', m('input.form-control', {
-                 type: 'number',
+               _formGroup('Lot', m('input.form-control', {
+                 type:'text',
                  min: 0,
                  step: 'any',
                  oninput: m.withAttr('value', (value) => {
@@ -87,8 +87,8 @@ const AddFishForm = {
                  }),
                  value: vnode.state.lengthInCM
                })),
-               _formGroup('Weight (kg)', m('input.form-control', {
-                 type: 'number',
+               _formGroup('Type', m('input.form-control', {
+                 type: 'text',
                  step: 'any',
                  oninput: m.withAttr('value', (value) => {
                    vnode.state.weightInKg = value
@@ -142,15 +142,7 @@ const AddFishForm = {
                        onblur: () => _updateReporters(vnode, i)
                      })),
 
-                   m('.col-sm-4',
-                     m(MultiSelect, {
-                       label: 'Select Fields',
-                       options: authorizableProperties,
-                       selected: reporter.properties,
-                       onchange: (selection) => {
-                         vnode.state.reporters[i].properties = selection
-                       }
-                     }))))),
+                   ))),
 
              m('.row.justify-content-end.align-items-end',
                m('col-2',
