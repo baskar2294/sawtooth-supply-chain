@@ -85,7 +85,7 @@ const FishList = {
 }
 
 const _controlButtons = (vnode, publicKey) => {
-  if (publicKey) {
+  if (false) {
     let filterRecords = (f) => {
       vnode.state.filteredRecords = vnode.state.records.filter(f)
     }

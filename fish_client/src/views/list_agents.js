@@ -87,12 +87,9 @@ const _controlButtons = (vnode, publicKey) => {
         m(FilterGroup, {
           ariaLabel: 'Filter Based on Ownership',
           filters: {
-            'All': () => { vnode.state.filteredAgents = vnode.state.agents },
-            'Owners': () => filterAgents(agent => agent.owns.length > 0),
-            'Custodians': () => filterAgents(agent => agent.custodian.length > 0),
-            'Reporters': () => filterAgents(agent => agent.reports.length > 0)
+            //'': () => { vnode.state.filteredAgents = vnode.state.agents }
           },
-          initialFilter: 'All'
+          //initialFilter: 'All'
         })),
       m('.col-sm-4', _pagingButtons(vnode))
     ]

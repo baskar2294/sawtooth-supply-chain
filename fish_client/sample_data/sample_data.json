@@ -1,7 +1,7 @@
 {
   "records": [
     {
-      "recordId": "1-4m-4-f1sh",
+      "recordId": "Creatinine_2",
       "recordType": "fish",
       "properties": [
           {
@@ -35,7 +35,7 @@
     },
 
     {
-      "recordId": "1-4m-sm0l-f1sh",
+      "recordId": "BNP",
       "recordType": "fish",
       "properties": [
           {
@@ -66,7 +66,7 @@
     },
 
     {
-      "recordId": "1-4m-n0t-f1sh",
+      "recordId": "CKMB",
       "recordType": "fish",
       "properties": [
           {
