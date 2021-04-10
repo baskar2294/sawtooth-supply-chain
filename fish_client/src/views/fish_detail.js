@@ -555,8 +555,8 @@ const FishDetail = {
         _row(_labelProperty('Reagent Name', getPropertyValue(record, 'species'))),
 
         _row(
-          _labelProperty('Lot', getPropertyValue(record, 'length', 0)),
-          _labelProperty('Type', getPropertyValue(record, 'weight', 0)),
+          _labelProperty('Lot', getPropertyValue(record, 'length')),
+          _labelProperty('Type', getPropertyValue(record, 'weight'))),
 
         _row(
           _labelProperty(
