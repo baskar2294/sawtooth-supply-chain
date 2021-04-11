@@ -11,13 +11,13 @@
           },
           {
             "name": "length",
-            "dataType": 3,
-            "numberValue": 2257000
+            "dataType": 4,
+            "stringValue": "BFT"
           },
           {
             "name": "weight",
-            "dataType": 3,
-            "numberValue": 247096000
+            "dataType": 4,
+            "stringValue": "BFT"
           },
           {
             "name": "location",
@@ -45,13 +45,13 @@
           },
           {
             "name": "length",
-            "dataType": 3,
-            "numberValue": 672000
+            "dataType": 4,
+            "stringValue": "BFT"
           },
           {
             "name": "weight",
-            "dataType": 3,
-            "numberValue": 7826000
+            "dataType": 4,
+            "stringValue": "BFT"
           },
           {
             "name": "location",
@@ -76,13 +76,13 @@
           },
           {
             "name": "length",
-            "dataType": 3,
-            "numberValue": 20567000
+            "dataType": 4,
+            "stringValue": "BFT"
           },
           {
             "name": "weight",
-            "dataType": 3,
-            "numberValue": 57243980000
+            "dataType": 4,
+            "stringValue": "BFT"
           },
           {
             "name": "location",

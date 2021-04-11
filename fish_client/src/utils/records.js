@@ -60,7 +60,7 @@ const countPropertyUpdates = (record) => {
   if (!record.updates.properties) {
     return 0
   }
-
+  console.log(record.updates.properties)
   return Object.values(record.updates.properties).reduce(
     (sum, updates) => sum + updates.length, 0)
 }

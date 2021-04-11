@@ -22,7 +22,7 @@ const GoogleMapsLoader = require('google-maps')
 const modals = require('./modals')
 const api = require('../services/api')
 
-GoogleMapsLoader.KEY = "AIzaSyAoKBW58lhrwhtHOUfDIOOZOX3JEK1_2wA"
+GoogleMapsLoader.KEY = null
 let google = null
 
 // If maps key is missing, asks server for it, and then finally the user
