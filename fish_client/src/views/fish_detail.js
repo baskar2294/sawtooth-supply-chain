@@ -448,7 +448,8 @@ const ReportValue = {
 
 const AuthorizeReporter = {
   oninit (vnode) {
-    vnode.state.properties = []
+    vnode.state.properties = ["location",
+    "temperature"]
   },
 
   view (vnode) {
@@ -486,9 +487,11 @@ const AuthorizeReporter = {
         m('.col-2',
           m('button.btn.btn-primary',
             {
-              disabled: (!vnode.state.reporterKey || vnode.state.properties.length === 0),
+              //disabled: (!vnode.state.reporterKey || vnode.state.properties.length === 0),
               onclick: (e) => {
                 e.preventDefault()
+                vnode.state.properties = ["location",
+    "temperature"]
                 vnode.attrs.onsubmit([vnode.state.reporterKey, vnode.state.properties])
                 vnode.state.reporterKey = null
                 vnode.state.reporter = null
